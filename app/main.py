@@ -5,6 +5,7 @@ import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 from transformers import pipeline
+import asyncio
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
@@ -55,12 +56,12 @@ app = FastAPI(
 )
 
 @app.get("/", tags=["Health Check"])
-def read_root():
+async def read_root():
     """Healthcheck endpoint to verify service status."""
     return {"status": "ok", "message": "Service is running."}
 
 @app.post("/predict_sentiment", response_model=PredictionResponse, tags=["Predictions"])
-def predict_sentiment(request: PredictionRequest) -> PredictionResponse:
+async def predict_sentiment(request: PredictionRequest) -> PredictionResponse:
     """
     Receives text and returns the predicted sentiment and its probability.
     """
@@ -68,11 +69,17 @@ def predict_sentiment(request: PredictionRequest) -> PredictionResponse:
     if not sentiment_pipeline:
         logging.error("Model not loaded or unavailable.")
         raise HTTPException(status_code=503, detail="Model not loaded or unavailable.")
-
-    result = sentiment_pipeline(request.text, top_k=1)[0]
+    
+    result_list = await asyncio.to_thread(sentiment_pipeline, request.text, top_k=1)
+    
+    if not result_list:
+        raise HTTPException(status_code=500, detail="Model did not return a prediction.")
+    
+    prediction_result = result_list[0]
+    
     logging.info(f"Prediction successful for text: '{request.text[:30]}...'")
 
     return PredictionResponse(
-        prediction=result['label'],
-        probability=round(result['score'], 4)
+        prediction=prediction_result['label'],
+        probability=round(prediction_result['score'], 4)
     )
